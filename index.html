@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MultiWeb — Live Local Site Wall</title>
+  <meta name="description" content="Watch every project folder's website at once. Auto-discovers subfolders with an index.html and tiles them in a live, auto-refreshing wall so you see edits as you make them.">
+  <link rel="icon" href="logo.webp" type="image/webp">
+  <link rel="stylesheet" href="fonts/carino-fonts.css">
+  <link href="css/styles.css" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ============================ Carino navbar ============================ -->
+  <header class="top-header">
+    <div class="header-left">
+      <a class="brand-name" href="https://carino.systems/" title="Carino Systems — back to hub">
+        Carino<span class="app-tag">MultiWeb</span>
+      </a>
+      <div class="header-clock" aria-hidden="true">
+        <span class="clock-time" id="clockLocal">00:00:00</span>
+        <span class="clock-tz" id="tzName">UTC</span>
+        <span class="brand-greeting" id="greeting">System Ready.</span>
+      </div>
+    </div>
+
+    <!-- Wall controls (merged into the navbar) -->
+    <div class="header-controls">
+      <button class="btn btn-accent" id="pickBtn" title="Choose which folders load">▤ Folders</button>
+      <span class="tb-label wall-label" id="wallLabel">No sites loaded</span>
+
+      <span class="ctrl-sep" aria-hidden="true"></span>
+
+      <div class="cols-seg" id="colsSeg" role="group" aria-label="Grid columns" title="Grid columns">
+        <button data-cols="auto" class="active" title="Fit automatically">Auto</button>
+        <button data-cols="1" title="1 column">1</button>
+        <button data-cols="2" title="2 columns">2</button>
+        <button data-cols="3" title="3 columns">3</button>
+        <button data-cols="4" title="4 columns">4</button>
+      </div>
+      <select class="tb-select" id="resSel" title="Simulate a screen resolution on every tile" aria-label="Simulated screen resolution"></select>
+
+      <span class="ctrl-sep" aria-hidden="true"></span>
+
+      <label class="auto-toggle" title="Auto-refresh tiles as their files change">
+        <input type="checkbox" id="autoChk" checked>
+        <span>Auto-refresh</span>
+      </label>
+      <select class="tb-select" id="intervalSel" title="Refresh interval" aria-label="Refresh interval">
+        <option value="1000">1s</option>
+        <option value="2000">2s</option>
+        <option value="3000" selected>3s</option>
+        <option value="5000">5s</option>
+        <option value="10000">10s</option>
+      </select>
+      <label class="auto-toggle" title="Only reload a tile when its files actually changed">
+        <input type="checkbox" id="smartChk" checked>
+        <span>Smart</span>
+      </label>
+      <button class="btn btn-ghost" id="reloadAllBtn" title="Reload every tile now">⟳</button>
+    </div>
+
+    <div class="header-right">
+      <div class="social-row">
+        <a href="https://github.com/MiguelCarino" target="_blank" rel="noopener" class="icon-btn" title="GitHub">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+        </a>
+        <a href="https://www.linkedin.com/in/miguelcarino94/" target="_blank" rel="noopener" class="icon-btn" title="LinkedIn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+        </a>
+      </div>
+      <button class="status-toggle" id="diagToggle" title="System status" aria-label="System status" aria-haspopup="true" aria-expanded="false" aria-controls="diagBox">
+        <span>Sys. Status</span><div class="pulse-dot"></div>
+      </button>
+    </div>
+
+    <!-- Diagnostics dropdown -->
+    <div class="diag-dropdown" id="diagBox">
+      <div class="diag-section">Wall</div>
+      <div class="diag-row"><span class="diag-lbl">Loaded tiles</span><span class="diag-val" id="diagActive">0</span></div>
+      <div class="diag-row"><span class="diag-lbl">Discovered</span><span class="diag-val" id="diagTotal">0</span></div>
+      <div class="diag-section">Refresh</div>
+      <div class="diag-row"><span class="diag-lbl">Auto-refresh</span><span class="diag-val" id="diagAuto">On</span></div>
+      <div class="diag-row"><span class="diag-lbl">Mode</span><span class="diag-val" id="diagMode">Smart</span></div>
+      <div class="diag-row"><span class="diag-lbl">Interval</span><span class="diag-val" id="diagInterval">3s</span></div>
+      <div class="diag-row"><span class="diag-lbl">Last change</span><span class="diag-val" id="diagLast">—</span></div>
+      <div class="diag-section">Session</div>
+      <div class="diag-row"><span class="diag-lbl">Root</span><span class="diag-val" id="diagRoot">—</span></div>
+      <div class="diag-row"><span class="diag-lbl">Layout</span><span class="diag-val" id="diagLayout">Auto</span></div>
+      <div class="diag-row"><span class="diag-lbl">Screen</span><span class="diag-val" id="diagScreen">Fit</span></div>
+      <div class="diag-row"><span class="diag-lbl">Local time</span><span class="diag-val" id="diagClock">--:--:--</span></div>
+    </div>
+  </header>
+
+  <!-- ============================ Stage ============================ -->
+  <main class="stage" id="stage" data-cols="auto">
+    <div class="grid" id="grid"></div>
+    <div class="empty-state" id="emptyState">
+      <div class="empty-card">
+        <div class="empty-title">No sites on the wall</div>
+        <p class="empty-sub">Pick which project folders to load. MultiWeb tiles each one and refreshes it live as you edit.</p>
+        <button class="btn btn-accent" id="emptyPickBtn">▤ Choose folders</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============================ Folder picker modal ============================ -->
+  <div class="modal-scrim" id="pickerScrim" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
+      <div class="modal-head">
+        <div>
+          <div class="modal-title" id="pickerTitle">Load folders</div>
+          <div class="modal-sub" id="pickerSub">Auto-discovered site folders</div>
+        </div>
+        <button class="modal-x" id="pickerClose" aria-label="Close">×</button>
+      </div>
+      <div class="picker-search">
+        <span class="search-ico" aria-hidden="true">⌕</span>
+        <input type="text" id="pickerFilter" placeholder="Filter folders…" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="picker-bar">
+        <button class="chip-btn" id="pickAll">Select all</button>
+        <button class="chip-btn" id="pickNone">Clear</button>
+        <button class="chip-btn" id="pickChanged">Only recently changed</button>
+        <span class="picker-count" id="pickerCount">0 selected</span>
+      </div>
+      <div class="picker-list" id="pickerList"></div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="pickerCancel">Cancel</button>
+        <button class="btn btn-accent" id="pickerApply">Load selected</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="carino-clock.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
