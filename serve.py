@@ -32,14 +32,29 @@ import json
 import os
 import sys
 import webbrowser
+from collections import OrderedDict
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, unquote
+from urllib.parse import parse_qs, unquote, urlparse
 
 INDEX_NAMES = ("index.html", "index.htm")
 API_PREFIX = "/__multiweb/api/"
 UI_PREFIX = "/__mw/"          # the MultiWeb UI, served independently of the root
 SITE_PREFIX = "/__site/"      # framed sites, scoped by root id so tabs can differ
+LOOPBACK = {"localhost", "127.0.0.1", "::1"}
+COUNT_CAP = 80               # stop annotating "N sites" past this many subfolders
+ROOTS_MAX = 64               # cap on remembered root ids (LRU) — bounds memory
+
+
+def within(base, path):
+    """True if `path` is `base` or lives underneath it. `base` None = anywhere."""
+    if not base:
+        return True
+    base, path = os.path.abspath(base), os.path.abspath(path)
+    try:
+        return os.path.commonpath([base, path]) == base
+    except ValueError:       # e.g. different drives on Windows
+        return False
 
 
 def has_index(folder):
@@ -110,31 +125,40 @@ def count_sites(folder):
     return n
 
 
-def browse(path):
+def browse(path, jail=None):
     """List the immediate subdirectories of `path` so the UI can walk the
     filesystem and pick a new root. Returns the folder, its parent, and each
     child dir annotated with whether it's itself a site and how many sites it
-    contains."""
+    contains. `jail`, if set, clamps navigation to that subtree.
+
+    To stay responsive on large directories, the per-subfolder "how many sites"
+    count is only computed when there are at most COUNT_CAP subfolders — past
+    that it's dropped (null) rather than firing a scandir per entry."""
     path = os.path.abspath(os.path.expanduser(path or "~"))
+    if jail and not within(jail, path):
+        path = os.path.abspath(jail)
     parent = os.path.dirname(path)
-    dirs = []
-    error = None
+    if parent == path or (jail and not within(jail, parent)):
+        parent = None
+    dirs, error = [], None
     try:
-        for entry in sorted(os.scandir(path), key=lambda e: e.name.lower()):
-            if not entry.is_dir() or entry.name.startswith("."):
-                continue
+        entries = [e for e in sorted(os.scandir(path), key=lambda e: e.name.lower())
+                   if e.is_dir() and not e.name.startswith(".")]
+        annotate = len(entries) <= COUNT_CAP
+        for entry in entries:
             dirs.append({
                 "name": entry.name,
                 "path": entry.path,
                 "isSite": bool(has_index(entry.path)),
-                "sites": count_sites(entry.path),
+                "sites": count_sites(entry.path) if annotate else None,
             })
     except OSError as e:
         error = str(e)
     return {
         "path": path,
-        "parent": parent if parent != path else None,
+        "parent": parent,
         "home": os.path.expanduser("~"),
+        "jail": os.path.abspath(jail) if jail else None,
         "sites": count_sites(path),
         "dirs": dirs,
         "error": error,
@@ -146,17 +170,40 @@ class Handler(SimpleHTTPRequestHandler):
     ui_dir = "."           # fixed: this MultiWeb folder, always reachable
     self_name = "MultiWeb"
     link_tabs = True       # global toggle: all tabs share shared_root
-    tab_roots = {}         # tabId -> path, used only when link_tabs is off
-    roots_by_id = {}       # rootId -> abspath, so /__site/<id>/ can be routed
+    tab_roots = OrderedDict()   # tabId -> path (LRU), used when link_tabs is off
+    roots_by_id = OrderedDict() # rootId -> abspath (LRU), routes /__site/<id>/
+    jail = None            # if set, browse/setroot are confined to this subtree
+    host_check = True      # reject non-loopback Host / cross-origin (DNS rebinding)
+    allowed_hosts = set(LOOPBACK)
 
     @staticmethod
     def rid(path):
         """Stable short id for a root path, registered so framed-site URLs
-        (/__site/<id>/…) can be routed back to the right directory."""
+        (/__site/<id>/…) can be routed back to the right directory. The registry
+        is an LRU capped at ROOTS_MAX; live roots (shared + per-tab) are never
+        evicted, so a long browsing session can't grow it without bound."""
         p = os.path.abspath(path)
         h = hashlib.sha1(p.encode("utf-8")).hexdigest()[:12]
-        Handler.roots_by_id[h] = p
+        r = Handler.roots_by_id
+        r[h] = p
+        r.move_to_end(h)
+        if len(r) > ROOTS_MAX:
+            live = {os.path.abspath(Handler.shared_root)}
+            live |= {os.path.abspath(v) for v in Handler.tab_roots.values()}
+            for k in list(r.keys()):
+                if len(r) <= ROOTS_MAX:
+                    break
+                if r[k] not in live:
+                    del r[k]
         return h
+
+    @staticmethod
+    def set_tab_root(tab, path):
+        t = Handler.tab_roots
+        t[tab] = os.path.abspath(path)
+        t.move_to_end(tab)
+        while len(t) > ROOTS_MAX:
+            t.popitem(last=False)   # forget the least-recently-used tab
 
     @staticmethod
     def root_for_tab(tab):
@@ -164,13 +211,39 @@ class Handler(SimpleHTTPRequestHandler):
             return Handler.shared_root
         return Handler.tab_roots.get(tab, Handler.shared_root)
 
+    def _guard(self):
+        """Block DNS-rebinding and cross-origin reads: a remote page can point
+        its DNS at 127.0.0.1, but it can't forge a loopback Host header, and a
+        cross-site fetch carries its own Origin. Skipped when bound to all
+        interfaces (the operator has explicitly opted into exposure)."""
+        if not Handler.host_check:
+            return True
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]").lower()
+        if host and host not in Handler.allowed_hosts:
+            self._deny("bad Host header")
+            return False
+        origin = self.headers.get("Origin")
+        if origin:
+            oh = (urlparse(origin).hostname or "").lower()
+            if oh and oh not in Handler.allowed_hosts:
+                self._deny("cross-origin request refused")
+                return False
+        return True
+
+    def _deny(self, msg, code=403):
+        body = msg.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_json(self, obj, code=200):
         body = json.dumps(obj).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(body)
 
@@ -204,6 +277,8 @@ class Handler(SimpleHTTPRequestHandler):
         return super().translate_path(p)
 
     def do_GET(self):
+        if not self._guard():
+            return
         path, _, query = self.path.partition("?")
         qs = parse_qs(query)
         tab = (qs.get("tab", [""])[0] or "").strip()
@@ -215,7 +290,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if path == API_PREFIX + "browse":
-            self._send_json(browse(unquote(qs.get("path", [""])[0])))
+            self._send_json(browse(unquote(qs.get("path", [""])[0]), Handler.jail))
             return
 
         if path == API_PREFIX + "current":
@@ -239,8 +314,8 @@ class Handler(SimpleHTTPRequestHandler):
                 Handler.link_tabs = True
             else:
                 Handler.link_tabs = False
-                if tab:
-                    Handler.tab_roots.setdefault(tab, Handler.shared_root)
+                if tab and tab not in Handler.tab_roots:
+                    Handler.set_tab_root(tab, Handler.shared_root)
             self._send_json(self._folders_payload(Handler.root_for_tab(tab)))
             return
 
@@ -249,10 +324,13 @@ class Handler(SimpleHTTPRequestHandler):
             if not os.path.isdir(target):
                 self._send_json({"error": "not a folder: " + target}, code=400)
                 return
+            if Handler.jail and not within(Handler.jail, target):
+                self._send_json({"error": "outside the allowed area: " + target}, code=403)
+                return
             if Handler.link_tabs or not tab:
                 Handler.shared_root = target
             else:
-                Handler.tab_roots[tab] = target
+                Handler.set_tab_root(tab, target)
             self._send_json(self._folders_payload(target))
             return
 
@@ -282,11 +360,34 @@ def main():
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--no-open", action="store_true", help="do not open the browser")
+    ap.add_argument("--anywhere", action="store_true",
+                    help="let the folder browser reach the whole filesystem "
+                         "(default: confined to your home folder)")
     args = ap.parse_args()
 
     root = os.path.abspath(os.path.expanduser(args.root))
     if not os.path.isdir(root):
         sys.exit(f"root folder not found: {root}")
+
+    # Confine browse/setroot to a subtree. Default = home; widened to the common
+    # ancestor if --root sits outside home; lifted entirely with --anywhere.
+    home = os.path.abspath(os.path.expanduser("~"))
+    if args.anywhere:
+        jail = None
+    elif within(home, root):
+        jail = home
+    else:
+        try:
+            jail = os.path.commonpath([home, root])
+        except ValueError:
+            jail = None
+    Handler.jail = jail
+
+    # DNS-rebinding guard only makes sense on a loopback bind; binding to all
+    # interfaces is an explicit choice to expose the tool, so we step aside.
+    exposed = args.host in ("0.0.0.0", "::", "")
+    Handler.host_check = not exposed
+    Handler.allowed_hosts = set(LOOPBACK) | {args.host.lower()}
 
     Handler.shared_root = root
     Handler.ui_dir = here
@@ -302,6 +403,10 @@ def main():
           + ", ".join(s['name'] for s in sites[:12])
           + (" …" if len(sites) > 12 else ""))
     print("Switch to any other folder from the picker — no restart needed.")
+    print(f"Folder browser: {'whole filesystem' if jail is None else 'confined to ' + jail}")
+    if exposed:
+        print("!! Bound to all interfaces — the loopback guard is off and other "
+              "devices can reach this server and its folder browser.")
     print(f"Open  {ui_url}")
     print("Ctrl+C to stop.")
     if not args.no_open:

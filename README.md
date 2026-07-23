@@ -20,6 +20,7 @@ Other options:
 python3 serve.py --root ~/sites   # start on a different folder
 python3 serve.py --port 9000      # different port
 python3 serve.py --no-open        # don't auto-open the browser
+python3 serve.py --anywhere       # let the folder browser leave your home folder
 ```
 
 On launch the **folder picker pops up** so you choose which folders load onto
@@ -105,6 +106,21 @@ carino-clock.js   shared fleet navbar clock
 fonts/            self-hosted IBM Plex + Red Hat Display
 ```
 
+## Staying local
+
+MultiWeb serves your own files and can list folders, so it's careful not to
+answer anyone but you:
+
+- **Loopback guard.** When bound to `localhost` (the default), requests whose
+  `Host` isn't loopback, or that carry a cross-site `Origin`, are refused — so a
+  random web page you have open can't reach `http://localhost:8787` and read your
+  folder listings (a DNS-rebinding / CORS leak). Bind to `0.0.0.0` and the guard
+  steps aside on purpose, with a warning, since you've chosen to expose it.
+- **Home-folder jail.** The **Change folder…** browser and `setroot` are confined
+  to your home folder (widened only if `--root` points outside it). Pass
+  `--anywhere` to browse the whole filesystem.
+- No wildcard CORS header, and nothing is sent anywhere off the machine.
+
 ## Notes / limits
 
 - **Local folders only.** Tiles are your own subfolders. Arbitrary production
@@ -128,5 +144,12 @@ A 40-tile wall of live documents is kept cheap by:
   catches up on return.
 - **Scoped polling** — the smart-refresh poll sends `?names=` so the server only
   stats the folders currently loaded, not the whole tree.
+- **One poll, not two** — that same smart poll already carries the current
+  root/link, so it doubles as the cross-tab sync; the standalone heartbeat only
+  runs when the wall is idle (nothing loaded, or auto-refresh off).
+- **Bounded memory** — the root-id registry and per-tab roots are LRU-capped, so
+  a long session of browsing around can't grow them without limit; and the
+  folder browser skips its per-subfolder "N sites" count past ~80 entries to
+  stay responsive on large directories.
 - Iframe scaling recomputes via a shared `ResizeObserver` (one callback per tile,
   no polling for layout).

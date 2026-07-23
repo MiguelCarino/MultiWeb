@@ -453,6 +453,9 @@
     // Smart mode: only reload tiles whose newest-file mtime advanced.
     // Poll only stats the folders actually loaded (fewer syscalls server-side).
     fetchFolders(state.selected).then(function (data) {
+      // This poll already carries root/link, so it doubles as the cross-tab
+      // sync — no separate heartbeat needed while the wall is polling.
+      if (noteServerState(data)) return;
       var changed = [];
       data.sites.forEach(function (s) {
         if (state.selected.indexOf(s.name) < 0) return;
@@ -466,9 +469,36 @@
   }
 
   /* ---------------------------------------------------------------- picker */
+  var pickerAPI = null;   // {draw, count, setPending} while the picker is open
+
   function setLinkUI() {
     var cb = $('linkTabs');
     if (cb) cb.checked = !!state.link;
+    updateDiag();
+  }
+
+  function pickerOpen() { return !$('pickerScrim').hidden; }
+
+  // Keep an open picker consistent after a change made elsewhere (another tab).
+  function refreshPickerIfOpen() {
+    if (!pickerOpen() || !pickerAPI) return;
+    pickerAPI.setPending(state.selected.slice());
+    setRootLabel();
+    pickerAPI.draw();
+    pickerAPI.count();
+  }
+
+  // React to the server reporting a different link mode or effective root than
+  // we hold — used by both the smart poll and the idle heartbeat. Returns true
+  // if a full root resync was kicked off (caller should stop processing).
+  function noteServerState(data) {
+    if (data.link !== state.link) { state.link = data.link; setLinkUI(); refreshPickerIfOpen(); }
+    if (data.root !== state.root) {
+      fetchFolders().then(function (d) { applyRootPayload(d); refreshPickerIfOpen(); })
+                    .catch(function () {});
+      return true;
+    }
+    return false;
   }
 
   // Adopt a folders payload as the current root. When the root actually changed
@@ -626,13 +656,16 @@
       startTimer();
     };
 
+    // Expose the internals so a cross-tab change can refresh an open picker.
+    pickerAPI = { draw: draw, count: count, setPending: function (v) { pending = v; } };
+
     setRootLabel();
     filter.value = '';
     draw(); count();
     $('pickerScrim').hidden = false;
     filter.focus();
   }
-  function closePicker() { $('pickerScrim').hidden = true; }
+  function closePicker() { $('pickerScrim').hidden = true; pickerAPI = null; }
 
   /* ---------------------------------------------------------------- diagnostics */
   function updateDiag() {
@@ -644,6 +677,9 @@
     $('diagInterval').textContent = (state.interval / 1000) + 's';
     $('diagLast').textContent = state.lastChange || '—';
     $('diagRoot').textContent = state.root ? state.root.split('/').pop() : '—';
+    var dt = $('diagTabs');
+    if (dt) { dt.textContent = state.link ? 'Shared' : 'Independent';
+      dt.className = 'diag-val ' + (state.link ? '' : 'warn'); }
     $('diagLayout').textContent = state.solo ? 'Solo' : (state.cols === 'auto' ? 'Auto' : state.cols + '-col');
     var rd = preset(state.resDefault);
     $('diagScreen').textContent = rd.w ? rd.label + ' (' + rd.w + '×' + rd.h + ')' : 'Fit';
@@ -666,7 +702,12 @@
     $('pickerClose').onclick = closePicker;
     $('pickerCancel').onclick = closePicker;
     $('pickerScrim').addEventListener('click', function (e) { if (e.target === $('pickerScrim')) closePicker(); });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePicker(); });
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' || !pickerOpen()) return;
+      // In the folder browser, Escape steps back to the folder list first.
+      if ($('pickerModal').dataset.view === 'browse') setPickerView('select');
+      else closePicker();
+    });
 
     $('colsSeg').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-cols]'); if (b) setCols(b.dataset.cols);
@@ -720,18 +761,17 @@
   }
 
   /* ---------------------------------------------------------------- cross-tab sync */
-  // Cheap poll so a tab notices when another tab flipped the link toggle or
-  // (while linked) moved the shared folder. Own changes are applied inline, so
-  // this only fires for changes made elsewhere.
+  // Cheap fallback so an idle tab (nothing on the wall, or auto-refresh off)
+  // still notices when another tab flips the link toggle or moves the shared
+  // folder. When the wall is actively smart-polling, that poll already carries
+  // root/link, so the heartbeat stands down to avoid a redundant request.
+  function pollingCoversSync() {
+    return state.auto && state.smart && state.selected.length > 0;
+  }
   function startHeartbeat() {
     setInterval(function () {
-      if (document.hidden) return;
-      fetchCurrent().then(function (c) {
-        if (c.link !== state.link) { state.link = c.link; setLinkUI(); }
-        if (c.root !== state.root) {
-          fetchFolders().then(function (data) { applyRootPayload(data); });
-        }
-      }).catch(function () { /* server hiccup — try again next beat */ });
+      if (document.hidden || pollingCoversSync()) return;
+      fetchCurrent().then(noteServerState).catch(function () { /* retry next beat */ });
     }, 2500);
   }
 
