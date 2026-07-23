@@ -317,6 +317,55 @@ button, input, select { font-family: inherit; }
 
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border); }
 
+/* Current-root bar + folder-browser view */
+.root-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--bg-elev);
+}
+.root-ico { flex-shrink: 0; opacity: .8; }
+.root-path {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: .78rem; color: var(--text-sec);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left;
+}
+.root-bar .chip-btn { flex-shrink: 0; }
+
+.pv { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.modal[data-view="select"] .pv-browse,
+.modal[data-view="select"] #browseUse,
+.modal[data-view="select"] #browseBack { display: none; }
+.modal[data-view="browse"] .pv-select,
+.modal[data-view="browse"] .root-bar,
+.modal[data-view="browse"] #pickerApply,
+.modal[data-view="browse"] #pickerCancel { display: none; }
+
+.browse-path { position: relative; display: flex; align-items: center; gap: 8px; padding: 12px 20px 0; }
+.browse-path .search-ico { position: absolute; left: 30px; top: 50%; transform: translateY(-30%); }
+.browse-path input {
+  flex: 1; height: 34px; padding: 0 10px 0 30px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); font-size: .82rem; font-family: var(--mono);
+}
+.browse-path input:focus { outline: none; border-color: var(--accent); }
+
+.browse-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 6px;
+  cursor: pointer; border: 1px solid transparent; width: 100%; text-align: left;
+  background: transparent; color: var(--text); font: inherit;
+}
+.browse-item:hover { background: var(--bg-elev); border-color: var(--border); }
+.browse-item .bi-ico { flex-shrink: 0; opacity: .8; }
+.browse-item .bi-name {
+  font-family: var(--mono); font-size: .84rem; flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.browse-item .bi-badge {
+  font-family: var(--mono); font-size: .6rem; text-transform: uppercase; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: 3px; color: var(--ok); border: 1px solid rgba(34,197,94,.35); flex-shrink: 0;
+}
+.browse-item .bi-count {
+  font-family: var(--mono); font-size: .68rem; color: var(--text-muted); flex-shrink: 0;
+}
+
 /* ---------------------------------------------------------------- Responsive */
 /* The navbar now carries the wall controls, so shed low-priority items
    progressively to keep everything on one row. */

@@ -97,6 +97,23 @@
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
   }
 
+  function fetchBrowse(path) {
+    var url = '/__multiweb/api/browse';
+    if (path) url += '?path=' + encodeURIComponent(path);
+    return fetch(url, { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+
+  function fetchSetRoot(path) {
+    return fetch('/__multiweb/api/setroot?path=' + encodeURIComponent(path), { cache: 'no-store' })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          if (!r.ok) throw new Error(j.error || r.status);
+          return j;
+        });
+      });
+  }
+
   function isServed() { return location.protocol === 'http:' || location.protocol === 'https:'; }
 
   try { state.res = JSON.parse(localStorage.getItem(LS_RES) || '{}'); } catch (e) { state.res = {}; }
@@ -420,10 +437,88 @@
   }
 
   /* ---------------------------------------------------------------- picker */
+  function setRootLabel() {
+    var rp = $('rootPath');
+    if (rp) { rp.textContent = state.root || '—'; rp.title = state.root || ''; }
+    var sub = $('pickerSub');
+    if (sub) sub.textContent = state.sites.length + ' folder' + (state.sites.length === 1 ? '' : 's') +
+      ' in ' + (state.root || 'root');
+  }
+
+  function setPickerView(v) { $('pickerModal').dataset.view = v; }
+
   function openPicker() {
     var list = $('pickerList');
     var filter = $('pickerFilter');
     var pending = state.selected.slice();
+
+    setPickerView('select');
+    setRootLabel();
+
+    /* -------- browse (choose a different root folder) -------- */
+    var browseCur = state.root;
+    var browseList = $('browseList');
+
+    function showBrowse(path) {
+      setPickerView('browse');
+      browseList.innerHTML = '<div class="picker-empty">Loading…</div>';
+      fetchBrowse(path).then(function (d) {
+        browseCur = d.path;
+        $('browseInput').value = d.path;
+        $('browseUp').disabled = !d.parent;
+        $('browseUp').dataset.path = d.parent || '';
+        $('browseHome').dataset.path = d.home || '';
+        $('browseHint').textContent = d.sites
+          ? d.sites + ' site folder' + (d.sites > 1 ? 's' : '') + ' here'
+          : 'no site folders directly here';
+        if (d.error) { browseList.innerHTML = '<div class="picker-empty">' + d.error + '</div>'; return; }
+        if (!d.dirs.length) { browseList.innerHTML = '<div class="picker-empty">No subfolders.</div>'; return; }
+        browseList.innerHTML = d.dirs.map(function (x) {
+          var badge = x.isSite ? '<span class="bi-badge">site</span>' : '';
+          var cnt = x.sites ? '<span class="bi-count">' + x.sites + ' site' + (x.sites > 1 ? 's' : '') + '</span>' : '';
+          return '<button class="browse-item" data-path="' + encodeURIComponent(x.path) + '">' +
+                 '<span class="bi-ico" aria-hidden="true">🗀</span>' +
+                 '<span class="bi-name">' + x.name + '</span>' + cnt + badge + '</button>';
+        }).join('');
+      }).catch(function (e) {
+        browseList.innerHTML = '<div class="picker-empty">Could not read folder (' + e.message + ').</div>';
+      });
+    }
+
+    browseList.onclick = function (e) {
+      var b = e.target.closest('.browse-item'); if (!b) return;
+      showBrowse(decodeURIComponent(b.dataset.path));
+    };
+    $('rootChange').onclick = function () { showBrowse(state.root); };
+    $('browseUp').onclick = function () { showBrowse($('browseUp').dataset.path || browseCur); };
+    $('browseHome').onclick = function () { showBrowse($('browseHome').dataset.path || ''); };
+    $('browseGo').onclick = function () { showBrowse($('browseInput').value.trim()); };
+    $('browseInput').onkeydown = function (e) { if (e.key === 'Enter') showBrowse(e.target.value.trim()); };
+    $('browseBack').onclick = function () { setPickerView('select'); };
+
+    // Commit the new root: the server switches which folder it frames, so the
+    // old wall no longer matches — clear it and let the user pick afresh.
+    $('browseUse').onclick = function () {
+      $('browseUse').disabled = true;
+      fetchSetRoot(browseCur).then(function (data) {
+        state.root = data.root;
+        state.sites = data.sites;
+        state.selected = [];
+        state.clones = [];
+        state.mtimes = {};
+        localStorage.setItem(LS_SEL, '[]');
+        localStorage.setItem(LS_CLONES, '[]');
+        pending = [];
+        renderWall();
+        startTimer();
+        setRootLabel();
+        setPickerView('select');
+        filter.value = '';
+        draw(); count();
+      }).catch(function (e) {
+        $('browseHint').textContent = 'Could not switch: ' + e.message;
+      }).then(function () { $('browseUse').disabled = false; });
+    };
 
     function draw() {
       var q = filter.value.trim().toLowerCase();
@@ -469,7 +564,7 @@
       startTimer();
     };
 
-    $('pickerSub').textContent = state.sites.length + ' folder(s) in ' + (state.root || 'root');
+    setRootLabel();
     filter.value = '';
     draw(); count();
     $('pickerScrim').hidden = false;

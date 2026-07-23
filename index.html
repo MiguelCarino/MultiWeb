@@ -106,7 +106,7 @@
 
   <!-- ============================ Folder picker modal ============================ -->
   <div class="modal-scrim" id="pickerScrim" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
+    <div class="modal" id="pickerModal" data-view="select" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
       <div class="modal-head">
         <div>
           <div class="modal-title" id="pickerTitle">Load folders</div>
@@ -114,20 +114,49 @@
         </div>
         <button class="modal-x" id="pickerClose" aria-label="Close">×</button>
       </div>
-      <div class="picker-search">
-        <span class="search-ico" aria-hidden="true">⌕</span>
-        <input type="text" id="pickerFilter" placeholder="Filter folders…" autocomplete="off" spellcheck="false">
+
+      <!-- Which folder is being scanned + switch to another one -->
+      <div class="root-bar">
+        <span class="root-ico" aria-hidden="true">🗀</span>
+        <span class="root-path" id="rootPath" title="">—</span>
+        <button class="chip-btn" id="rootChange">Change folder…</button>
       </div>
-      <div class="picker-bar">
-        <button class="chip-btn" id="pickAll">Select all</button>
-        <button class="chip-btn" id="pickNone">Clear</button>
-        <button class="chip-btn" id="pickChanged">Only recently changed</button>
-        <span class="picker-count" id="pickerCount">0 selected</span>
+
+      <!-- View: choose which discovered folders to load -->
+      <div class="pv pv-select">
+        <div class="picker-search">
+          <span class="search-ico" aria-hidden="true">⌕</span>
+          <input type="text" id="pickerFilter" placeholder="Filter folders…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="picker-bar">
+          <button class="chip-btn" id="pickAll">Select all</button>
+          <button class="chip-btn" id="pickNone">Clear</button>
+          <button class="chip-btn" id="pickChanged">Only recently changed</button>
+          <span class="picker-count" id="pickerCount">0 selected</span>
+        </div>
+        <div class="picker-list" id="pickerList"></div>
       </div>
-      <div class="picker-list" id="pickerList"></div>
+
+      <!-- View: browse the filesystem and pick a different root -->
+      <div class="pv pv-browse">
+        <div class="browse-path">
+          <span class="search-ico" aria-hidden="true">🗀</span>
+          <input type="text" id="browseInput" placeholder="Type or paste a folder path…" autocomplete="off" spellcheck="false">
+          <button class="chip-btn" id="browseGo">Go</button>
+        </div>
+        <div class="picker-bar">
+          <button class="chip-btn" id="browseUp">⭡ Up</button>
+          <button class="chip-btn" id="browseHome">Home</button>
+          <span class="picker-count" id="browseHint">—</span>
+        </div>
+        <div class="picker-list" id="browseList"></div>
+      </div>
+
       <div class="modal-foot">
         <button class="btn btn-ghost" id="pickerCancel">Cancel</button>
+        <button class="btn btn-ghost" id="browseBack">Back</button>
         <button class="btn btn-accent" id="pickerApply">Load selected</button>
+        <button class="btn btn-accent" id="browseUse">Scan this folder</button>
       </div>
     </div>
   </div>

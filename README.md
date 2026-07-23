@@ -17,7 +17,7 @@ python3 serve.py            # root = parent folder (…/Github), port 8787, open
 Other options:
 
 ```bash
-python3 serve.py --root ~/sites   # watch a different folder
+python3 serve.py --root ~/sites   # start on a different folder
 python3 serve.py --port 9000      # different port
 python3 serve.py --no-open        # don't auto-open the browser
 ```
@@ -26,15 +26,27 @@ On launch the **folder picker pops up** so you choose which folders load onto
 the wall. Your selection is remembered per browser; reopen it any time with the
 **▤ Folders** button.
 
+### Switching the scanned folder
+
+`--root` only sets the *starting* folder. From the picker, **Change folder…**
+opens a filesystem browser — walk into any directory (or type/paste a path),
+see how many site folders each candidate holds, then **Scan this folder** to
+point MultiWeb there. No restart needed; the server remembers the choice for its
+lifetime. The UI is served from a fixed `/__mw/` mount that's independent of the
+scanned root, so switching folders never pulls the page out from under you.
+
 ## Why a server?
 
 Browsers can't list a directory, and most sites block being framed. `serve.py`
 solves both:
 
 - Serves the **root folder** so every subfolder's `index.html` is *same-origin*
-  and therefore framable.
+  and therefore framable, and serves its own UI from a fixed `/__mw/` mount that
+  stays put when you switch the scanned root.
 - Exposes `GET /__multiweb/api/folders` → JSON of subfolders that have an index
-  file, each with a newest-file `mtime` used for change detection.
+  file, each with a newest-file `mtime` used for change detection;
+  `…/browse?path=` to walk the filesystem; and `…/setroot?path=` to switch the
+  watched folder without restarting.
 
 Because framing and discovery both depend on the server, MultiWeb runs locally
 rather than as a static `*.carino.systems` deploy.
@@ -44,6 +56,7 @@ rather than as a static `*.carino.systems` deploy.
 | Control | Does |
 |---|---|
 | **▤ Folders** | Open the picker (select all / clear / only recently changed / filter) |
+| **Change folder…** | Browse the filesystem and switch which root folder MultiWeb scans, live |
 | **Columns** | Auto / 1 / 2 / 3 / 4 grid density |
 | **Screen** | Simulate a resolution on **every** tile, grouped: Desktop 16:9 (720p–4K), Ultrawide/Super 21:9·32:9, Laptop 16:10, Tablet, Mobile, and pure aspect ratios (1:1, 4:3, 3:2, 16:9, 21:9, 9:16 portrait). The site renders at that pixel size and is scaled to fit the tile (a `w×h · scale%` badge shows the fit). Per-tile dropdowns override the global default. |
 | **Auto-refresh** | Toggle live reloading |
@@ -67,7 +80,7 @@ load — they reuse the same folder poll.
 ## Layout
 
 ```
-serve.py          local server + /__multiweb/api/folders discovery
+serve.py          local server + discovery/browse/setroot API; UI at /__mw/
 index.html        navbar (brand/clock + wall controls + social/status) + grid + picker modal
 css/styles.css    Carino navbar tokens + grid/tile/modal styles
 js/app.js         discovery, picker, tiles, smart auto-refresh
