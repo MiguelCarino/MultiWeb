@@ -35,6 +35,20 @@ point MultiWeb there. No restart needed; the server remembers the choice for its
 lifetime. The UI is served from a fixed `/__mw/` mount that's independent of the
 scanned root, so switching folders never pulls the page out from under you.
 
+### One folder, or one per tab
+
+The picker's **Same folder on all tabs** toggle controls scope:
+
+- **On** (default) — every MultiWeb tab shares one folder; switching it in any
+  tab moves them all. A tab notices within a couple of seconds and resyncs.
+- **Off** — each browser tab keeps its own folder, so you can watch, say,
+  `~/Github` in one tab and `~/clients/acme` in another at the same time.
+
+This works because framed sites are served under a **root-scoped URL**
+(`/__site/<rootId>/<name>/`), so the server always knows which folder a tile
+belongs to regardless of which tab opened it. The toggle is a server-wide mode;
+each tab is identified by a `sessionStorage` id that survives reloads.
+
 ## Why a server?
 
 Browsers can't list a directory, and most sites block being framed. `serve.py`
@@ -45,8 +59,10 @@ solves both:
   stays put when you switch the scanned root.
 - Exposes `GET /__multiweb/api/folders` → JSON of subfolders that have an index
   file, each with a newest-file `mtime` used for change detection;
-  `…/browse?path=` to walk the filesystem; and `…/setroot?path=` to switch the
-  watched folder without restarting.
+  `…/browse?path=` to walk the filesystem; `…/setroot?path=` to switch the
+  watched folder without restarting; `…/link?on=` for the all-tabs toggle; and
+  `…/current` as a cheap cross-tab heartbeat. Requests carry a `tab=` id so the
+  server can hand each tab its own folder when tabs are unlinked.
 
 Because framing and discovery both depend on the server, MultiWeb runs locally
 rather than as a static `*.carino.systems` deploy.
@@ -57,6 +73,7 @@ rather than as a static `*.carino.systems` deploy.
 |---|---|
 | **▤ Folders** | Open the picker (select all / clear / only recently changed / filter) |
 | **Change folder…** | Browse the filesystem and switch which root folder MultiWeb scans, live |
+| **Same folder on all tabs** | On: all tabs share one folder. Off: each tab picks its own |
 | **Columns** | Auto / 1 / 2 / 3 / 4 grid density |
 | **Screen** | Simulate a resolution on **every** tile, grouped: Desktop 16:9 (720p–4K), Ultrawide/Super 21:9·32:9, Laptop 16:10, Tablet, Mobile, and pure aspect ratios (1:1, 4:3, 3:2, 16:9, 21:9, 9:16 portrait). The site renders at that pixel size and is scaled to fit the tile (a `w×h · scale%` badge shows the fit). Per-tile dropdowns override the global default. |
 | **Auto-refresh** | Toggle live reloading |

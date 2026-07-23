@@ -7,6 +7,20 @@
   'use strict';
 
   var API = '/__multiweb/api/folders';
+  var API_BASE = '/__multiweb/api/';
+
+  // A stable per-tab id (sessionStorage is per-tab and survives reload) so the
+  // server can give each browser tab its own folder when tabs are unlinked.
+  var TAB = (function () {
+    var k = 'multiweb.tab', v = null;
+    try { v = sessionStorage.getItem(k); } catch (e) {}
+    if (!v) {
+      v = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      try { sessionStorage.setItem(k, v); } catch (e) {}
+    }
+    return v;
+  })();
+
   var LS_SEL = 'multiweb.selected';   // array of folder names
   var LS_COLS = 'multiweb.cols';
   var LS_AUTO = 'multiweb.auto';
@@ -74,6 +88,8 @@
 
   var state = {
     root: '',
+    rootId: '',           // server id for the current root (scopes tile URLs)
+    link: true,           // "same folder on all tabs" toggle (global on server)
     sites: [],            // [{name,url,index,mtime}]
     selected: [],         // names currently on the wall
     mtimes: {},           // name -> last-seen mtime
@@ -91,9 +107,20 @@
 
   /* ---------------------------------------------------------------- discovery */
   function fetchFolders(names) {
-    var url = API;
-    if (names && names.length) url += '?names=' + encodeURIComponent(names.join(','));
+    var url = API + '?tab=' + encodeURIComponent(TAB);
+    if (names && names.length) url += '&names=' + encodeURIComponent(names.join(','));
     return fetch(url, { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+
+  function fetchCurrent() {
+    return fetch(API_BASE + 'current?tab=' + encodeURIComponent(TAB), { cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
+  }
+
+  function fetchLink(on) {
+    return fetch(API_BASE + 'link?tab=' + encodeURIComponent(TAB) + '&on=' + (on ? '1' : '0'),
+                 { cache: 'no-store' })
       .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); });
   }
 
@@ -105,7 +132,8 @@
   }
 
   function fetchSetRoot(path) {
-    return fetch('/__multiweb/api/setroot?path=' + encodeURIComponent(path), { cache: 'no-store' })
+    return fetch(API_BASE + 'setroot?tab=' + encodeURIComponent(TAB) +
+                 '&path=' + encodeURIComponent(path), { cache: 'no-store' })
       .then(function (r) {
         return r.json().then(function (j) {
           if (!r.ok) throw new Error(j.error || r.status);
@@ -192,7 +220,8 @@
   // `inst` = {id, name}. A base tile has id === name; a clone shares the name.
   function makeTile(inst) {
     var name = inst.name;
-    var site = state.sites.find(function (s) { return s.name === name; }) || { name: name, url: '/' + name + '/' };
+    var site = state.sites.find(function (s) { return s.name === name; }) ||
+               { name: name, url: '/__site/' + state.rootId + '/' + name + '/' };
     var isClone = inst.id !== name;
     var res = effRes(inst.id);
     var tile = document.createElement('div');
@@ -437,6 +466,34 @@
   }
 
   /* ---------------------------------------------------------------- picker */
+  function setLinkUI() {
+    var cb = $('linkTabs');
+    if (cb) cb.checked = !!state.link;
+  }
+
+  // Adopt a folders payload as the current root. When the root actually changed
+  // (a switch, or another tab moved the shared root) the wall no longer matches,
+  // so clear the selection and re-render; otherwise just refresh the folder list.
+  function applyRootPayload(data) {
+    var changed = state.root !== data.root;
+    state.root = data.root;
+    state.rootId = data.rootId;
+    state.link = data.link;
+    state.sites = data.sites;
+    if (changed) {
+      state.selected = [];
+      state.clones = [];
+      state.mtimes = {};
+      localStorage.setItem(LS_SEL, '[]');
+      localStorage.setItem(LS_CLONES, '[]');
+      renderWall();
+      startTimer();
+    }
+    setLinkUI();
+    setRootLabel();
+    return changed;
+  }
+
   function setRootLabel() {
     var rp = $('rootPath');
     if (rp) { rp.textContent = state.root || '—'; rp.title = state.root || ''; }
@@ -496,28 +553,33 @@
     $('browseInput').onkeydown = function (e) { if (e.key === 'Enter') showBrowse(e.target.value.trim()); };
     $('browseBack').onclick = function () { setPickerView('select'); };
 
-    // Commit the new root: the server switches which folder it frames, so the
-    // old wall no longer matches — clear it and let the user pick afresh.
+    // Commit the new root: the server switches which folder it frames (for this
+    // tab, or all tabs when linked), so the old wall no longer matches — clear
+    // it and let the user pick afresh.
     $('browseUse').onclick = function () {
       $('browseUse').disabled = true;
       fetchSetRoot(browseCur).then(function (data) {
-        state.root = data.root;
-        state.sites = data.sites;
-        state.selected = [];
-        state.clones = [];
-        state.mtimes = {};
-        localStorage.setItem(LS_SEL, '[]');
-        localStorage.setItem(LS_CLONES, '[]');
+        applyRootPayload(data);
         pending = [];
-        renderWall();
-        startTimer();
-        setRootLabel();
         setPickerView('select');
         filter.value = '';
         draw(); count();
       }).catch(function (e) {
         $('browseHint').textContent = 'Could not switch: ' + e.message;
       }).then(function () { $('browseUse').disabled = false; });
+    };
+
+    // "Same folder on all tabs" — flips the global link mode on the server.
+    $('linkTabs').onchange = function () {
+      var on = $('linkTabs').checked;
+      $('linkTabs').disabled = true;
+      fetchLink(on).then(function (data) {
+        applyRootPayload(data);
+        pending = state.selected.slice();
+        draw(); count();
+      }).catch(function () {
+        $('linkTabs').checked = !on;  // revert on failure
+      }).then(function () { $('linkTabs').disabled = false; });
     };
 
     function draw() {
@@ -657,6 +719,22 @@
     setCols(state.cols);
   }
 
+  /* ---------------------------------------------------------------- cross-tab sync */
+  // Cheap poll so a tab notices when another tab flipped the link toggle or
+  // (while linked) moved the shared folder. Own changes are applied inline, so
+  // this only fires for changes made elsewhere.
+  function startHeartbeat() {
+    setInterval(function () {
+      if (document.hidden) return;
+      fetchCurrent().then(function (c) {
+        if (c.link !== state.link) { state.link = c.link; setLinkUI(); }
+        if (c.root !== state.root) {
+          fetchFolders().then(function (data) { applyRootPayload(data); });
+        }
+      }).catch(function () { /* server hiccup — try again next beat */ });
+    }, 2500);
+  }
+
   /* ---------------------------------------------------------------- boot */
   function boot() {
     wire();
@@ -673,7 +751,10 @@
 
     fetchFolders().then(function (data) {
       state.root = data.root;
+      state.rootId = data.rootId;
+      state.link = data.link;
       state.sites = data.sites;
+      setLinkUI();
       try { state.selected = JSON.parse(localStorage.getItem(LS_SEL) || '[]'); } catch (e) { state.selected = []; }
       // Drop any remembered folders that no longer exist.
       var names = data.sites.map(function (s) { return s.name; });
@@ -686,6 +767,7 @@
 
       renderWall();
       startTimer();
+      startHeartbeat();
 
       // "Ask at server start": pop the picker so you choose the wall each launch.
       openPicker();

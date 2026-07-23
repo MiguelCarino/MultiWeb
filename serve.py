@@ -17,10 +17,17 @@ itself is always served from the fixed  /__mw/  mount, so switching the watched
 root never pulls the UI out from under you. The chosen root is remembered for the
 life of the server process.
 
+Tabs can be linked or independent. With "same folder on all tabs" on (default),
+every tab shares one root and switching it in one tab moves them all. Turn it off
+and each tab keeps its own root — which works because framed sites are served
+under a root-scoped URL (/__site/<rootId>/<name>/), so the server always knows
+which folder a tile belongs to regardless of which tab opened it.
+
 The UI opens automatically at  http://localhost:PORT/__mw/  and the folder
 picker pops up there on load.
 """
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -32,6 +39,7 @@ from urllib.parse import parse_qs, unquote
 INDEX_NAMES = ("index.html", "index.htm")
 API_PREFIX = "/__multiweb/api/"
 UI_PREFIX = "/__mw/"          # the MultiWeb UI, served independently of the root
+SITE_PREFIX = "/__site/"      # framed sites, scoped by root id so tabs can differ
 
 
 def has_index(folder):
@@ -134,9 +142,27 @@ def browse(path):
 
 
 class Handler(SimpleHTTPRequestHandler):
-    root = "."             # mutable: the folder currently watched/framed
+    shared_root = "."      # the root all linked tabs share
     ui_dir = "."           # fixed: this MultiWeb folder, always reachable
     self_name = "MultiWeb"
+    link_tabs = True       # global toggle: all tabs share shared_root
+    tab_roots = {}         # tabId -> path, used only when link_tabs is off
+    roots_by_id = {}       # rootId -> abspath, so /__site/<id>/ can be routed
+
+    @staticmethod
+    def rid(path):
+        """Stable short id for a root path, registered so framed-site URLs
+        (/__site/<id>/…) can be routed back to the right directory."""
+        p = os.path.abspath(path)
+        h = hashlib.sha1(p.encode("utf-8")).hexdigest()[:12]
+        Handler.roots_by_id[h] = p
+        return h
+
+    @staticmethod
+    def root_for_tab(tab):
+        if Handler.link_tabs or not tab:
+            return Handler.shared_root
+        return Handler.tab_roots.get(tab, Handler.shared_root)
 
     def _send_json(self, obj, code=200):
         body = json.dumps(obj).encode("utf-8")
@@ -148,37 +174,74 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _folders_payload(self, only=None):
+    def _folders_payload(self, root, only=None):
+        rid = Handler.rid(root)
+        sites = discover(root, self.self_name, only, Handler.ui_dir)
+        for s in sites:  # scope each tile's URL to its root so tabs can differ
+            s["url"] = SITE_PREFIX + rid + "/" + s["name"] + "/"
         return {
-            "root": os.path.abspath(Handler.root),
+            "root": os.path.abspath(root),
+            "rootId": rid,
+            "link": Handler.link_tabs,
             "self": self.self_name,
-            "sites": discover(Handler.root, self.self_name, only, Handler.ui_dir),
+            "sites": sites,
         }
 
     def translate_path(self, path):
-        # Route the UI mount to the fixed MultiWeb folder and everything else to
-        # the current (switchable) root, so changing the root never unmounts the
-        # UI the browser is already running.
+        # Three roots on one server: the fixed UI mount, the root-scoped framed
+        # sites, and (legacy) the shared root. Routing purely on the URL means a
+        # tile request needs no knowledge of which tab opened it.
         p = path.split("?", 1)[0].split("#", 1)[0]
         if p == UI_PREFIX.rstrip("/") or p.startswith(UI_PREFIX):
             self.directory = self.ui_dir
             rest = p[len(UI_PREFIX):] if p.startswith(UI_PREFIX) else ""
             return super().translate_path("/" + rest)
-        self.directory = Handler.root
+        if p.startswith(SITE_PREFIX):
+            rid, _, tail = p[len(SITE_PREFIX):].partition("/")
+            self.directory = Handler.roots_by_id.get(rid, Handler.shared_root)
+            return super().translate_path("/" + tail)
+        self.directory = Handler.shared_root
         return super().translate_path(p)
 
     def do_GET(self):
         path, _, query = self.path.partition("?")
         qs = parse_qs(query)
+        tab = (qs.get("tab", [""])[0] or "").strip()
 
         if path == API_PREFIX + "folders":
             names = qs.get("names", [""])[0]
             only = set(filter(None, names.split(","))) if names else None
-            self._send_json(self._folders_payload(only))
+            self._send_json(self._folders_payload(Handler.root_for_tab(tab), only))
             return
 
         if path == API_PREFIX + "browse":
             self._send_json(browse(unquote(qs.get("path", [""])[0])))
+            return
+
+        if path == API_PREFIX + "current":
+            # Cheap heartbeat (no scandir): lets each tab notice when another
+            # tab moved the shared root, or flipped the link toggle.
+            root = Handler.root_for_tab(tab)
+            self._send_json({
+                "root": os.path.abspath(root),
+                "rootId": Handler.rid(root),
+                "link": Handler.link_tabs,
+            })
+            return
+
+        if path == API_PREFIX + "link":
+            on = qs.get("on", ["1"])[0] not in ("0", "false", "")
+            if on:
+                # Linking adopts the calling tab's folder as the shared one, so
+                # "same folder on all tabs" means *this* folder everywhere.
+                if tab and tab in Handler.tab_roots:
+                    Handler.shared_root = Handler.tab_roots[tab]
+                Handler.link_tabs = True
+            else:
+                Handler.link_tabs = False
+                if tab:
+                    Handler.tab_roots.setdefault(tab, Handler.shared_root)
+            self._send_json(self._folders_payload(Handler.root_for_tab(tab)))
             return
 
         if path == API_PREFIX + "setroot":
@@ -186,8 +249,11 @@ class Handler(SimpleHTTPRequestHandler):
             if not os.path.isdir(target):
                 self._send_json({"error": "not a folder: " + target}, code=400)
                 return
-            Handler.root = target
-            self._send_json(self._folders_payload())
+            if Handler.link_tabs or not tab:
+                Handler.shared_root = target
+            else:
+                Handler.tab_roots[tab] = target
+            self._send_json(self._folders_payload(target))
             return
 
         super().do_GET()
@@ -222,9 +288,10 @@ def main():
     if not os.path.isdir(root):
         sys.exit(f"root folder not found: {root}")
 
-    Handler.root = root
+    Handler.shared_root = root
     Handler.ui_dir = here
     Handler.self_name = self_name
+    Handler.rid(root)  # pre-register so the first framed sites route immediately
     handler = partial(Handler, directory=root)
 
     server = ThreadingHTTPServer((args.host, args.port), handler)
