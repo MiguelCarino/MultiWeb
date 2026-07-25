@@ -9,16 +9,13 @@
   --bg-card:      #111111;
   --bg-elev:      #161616;
   --accent:       #eab308;
-  --accent-2:     #b45309;
   --accent-faint: rgba(234,179,8,0.06);
   --accent-glow:  rgba(234,179,8,0.18);
-  --accent-dim:   rgba(234,179,8,0.30);
   --border:       #262626;
-  --border-hv:    #eab308;
   --text:         #ffffff;
   --text-sec:     #a3a3a3;
   --text-muted:   #8a8a8a;
-  --live:         #ef4444;
+  --err:          #ef4444;
   --ok:           #22c55e;
 
   --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -61,6 +58,8 @@ button, input, select { font-family: inherit; }
 }
 .ctrl-sep { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
 
+/* Split brand: "Carino" → hub, the MultiWeb chip → this app's own root (fresh reload) */
+.brand { display: flex; align-items: center; flex-shrink: 0; }
 .brand-name {
   font-family: var(--display);
   font-size: 1.7rem; font-weight: 900; line-height: 1;
@@ -69,14 +68,14 @@ button, input, select { font-family: inherit; }
   -webkit-text-fill-color: transparent;
   cursor: pointer; white-space: nowrap; text-decoration: none;
 }
-.brand-name .app-tag {
-  -webkit-text-fill-color: var(--text);
+.brand .app-tag {
   font-family: var(--mono); font-size: .62rem; font-weight: 700;
   letter-spacing: .14em; text-transform: uppercase;
   border: 1px solid var(--border); border-radius: 4px;
-  padding: 3px 7px; margin-left: 12px; vertical-align: middle;
-  color: var(--accent);
+  padding: 3px 7px; margin-left: 12px;
+  color: var(--accent); text-decoration: none; transition: .2s;
 }
+.brand .app-tag:hover { border-color: var(--accent); background: rgba(234,179,8,.12); }
 .header-clock {
   display: flex; align-items: baseline; gap: 10px;
   border-left: 1px solid var(--border); padding-left: 22px;
@@ -152,7 +151,7 @@ button, input, select { font-family: inherit; }
 }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 .btn-accent { background: var(--accent); color: #050505; border-color: var(--accent); font-weight: 700; }
-.btn-accent:hover { background: #fde047; color: #050505; }
+.btn-accent:hover { background: #fbbf24; color: #050505; }
 .btn-ghost { background: transparent; }
 
 .cols-seg { display: flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
@@ -208,7 +207,7 @@ button, input, select { font-family: inherit; }
   letter-spacing: .04em; text-transform: uppercase; vertical-align: middle;
   color: var(--accent); background: var(--accent-glow); border: 1px solid var(--border);
 }
-.tile-btn-x:hover { color: var(--err, #ef4444); border-color: var(--err, #ef4444); }
+.tile-btn-x:hover { color: var(--err); border-color: var(--err); }
 
 .tile-bar {
   display: flex; align-items: center; gap: 8px; height: 30px; flex-shrink: 0;
@@ -381,7 +380,7 @@ button, input, select { font-family: inherit; }
 @media (max-width: 720px) {
   .brand-greeting, .header-clock { display: none; }
   .top-header { padding: 0 12px; gap: 10px; }
-  .brand-name .app-tag { display: none; }
+  .brand .app-tag { display: none; }
   .status-toggle span { display: none; }
   .status-toggle { padding: 0 10px; }
   .social-row { display: none; }
