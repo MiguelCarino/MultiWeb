@@ -45,6 +45,14 @@ button, input, select { font-family: inherit; }
 }
 .header-left  { display: flex; align-items: center; gap: 16px; min-width: 0; flex-shrink: 0; }
 .header-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+/* Right-cluster slot order, fleet convention, read right-to-left:
+   GitHub + LinkedIn last, language beside them, then status, then
+   this app's own controls furthest from the edge. Set with `order`
+   because carino-lang.js injects itself asynchronously. */
+.header-right > * { order: 1; }
+.header-right > .status-toggle { order: 2; }
+.header-right > #cnLangBtn { order: 3; }
+.header-right > .social-row { order: 4; }
 
 /* Wall controls merged into the navbar (middle group). */
 .header-controls {
