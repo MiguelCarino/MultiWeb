@@ -138,10 +138,16 @@ button, input, select { font-family: inherit; }
 .diag-section {
   font-family: var(--mono); font-size: .6rem; letter-spacing: .12em;
   text-transform: uppercase; color: var(--text-muted);
-  margin: 12px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px;
+  margin: 10px 0 5px; border-bottom: 1px solid var(--border); padding-bottom: 4px;
 }
 .diag-section:first-child { margin-top: 0; }
-.diag-row { display: flex; justify-content: space-between; align-items: center; font-size: .8rem; padding: 3px 0; }
+.diag-row { display: flex; justify-content: space-between; align-items: center; font-size: .8rem; padding: 2px 0; }
+
+/* Two short readings share one line. Each half keeps its natural width, so a
+   value that outgrows the half (a long root path) wraps the pair back into
+   full-width rows instead of truncating — the panel is only 280px. */
+.diag-pair { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 20px; }
+.diag-pair > .diag-row { flex: 0 1 auto; min-width: max-content; gap: 8px; }
 .diag-lbl { color: var(--text-sec); }
 .diag-val { font-family: var(--mono); color: var(--text); }
 .diag-val.good { color: var(--ok); }
